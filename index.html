@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Zylite Editor</title>
+<link rel="icon" type="image/png" href="Zylite_png.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs/loader.min.js"></script>
+<style>
+:root {
+  --bg:        #111111;
+  --sb-bg:     #111111;
+  --text:      #cecece;
+  --text-sub:  #737373;
+  --text-dim:  #424242;
+  --border:    rgba(255,255,255,0.055);
+  --hover-bg:  rgba(255,255,255,0.045);
+  --active-bg: rgba(255,255,255,0.08);
+  --ease:      cubic-bezier(.25,.1,.25,1);
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+#app{display:flex;height:100vh;width:100vw;color:var(--text);overflow:hidden}
+
+/* ── scrollbars ── */
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15)}
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.08) transparent}
+
+/* ── Monaco monochrome patch ── */
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row.selected,
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row.focused,
+.monaco-list .monaco-list-row.focused,
+.monaco-list .monaco-list-row.selected{background:rgba(255,255,255,0.07)!important}
+.monaco-editor .find-widget input:focus{border-color:rgba(255,255,255,0.22)!important}
+.monaco-editor .hover-overlay-widget{border-color:rgba(255,255,255,0.06)!important;background:#181818!important}
+.monaco-scrollable-element .scrollbar .slider{background:rgba(255,255,255,0.06)!important}
+.monaco-scrollable-element .scrollbar .slider:hover{background:rgba(255,255,255,0.1)!important}
+
+/* ════════════════════════════
+   EDITOR SIDE
+════════════════════════════ */
+#right{flex:1;display:flex;flex-direction:column;height:100vh;min-width:0;overflow:hidden}
+
+/* ── Tab bar ── */
+#tabs-bar{
+  height:44px;
+  display:flex;
+  align-items:center;
+  gap:1px;
+  padding:0 8px;
+  background:var(--bg);
+  border-bottom:1px solid var(--border);
+  overflow-x:auto;
+  flex-shrink:0;
+}
+#tabs-bar::-webkit-scrollbar{height:0}
+
+/* ── Individual tab ── */
+.tab{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  height:30px;
+  padding:0 12px 0 13px;
+  border-radius:7px;
+  background:transparent;
+  color:var(--text-sub);
+  font-family:'Inter',sans-serif;
+  font-size:13px;
+  font-weight:400;
+  letter-spacing:-0.01em;
+  cursor:pointer;
+  white-space:nowrap;
+  flex-shrink:0;
+  user-select:none;
+  position:relative;
+  border:none;
+  outline:none;
+  /* smooth in */
+  opacity:0;
+  animation:tabAppear .2s var(--ease) forwards;
+  transition:background .18s var(--ease), color .18s var(--ease);
+}
+@keyframes tabAppear{
+  from{opacity:0;transform:translateY(4px) scale(.97)}
+  to  {opacity:1;transform:none}
+}
+@keyframes tabLeave{
+  from{opacity:1;transform:none}
+  to  {opacity:0;transform:translateY(4px) scale(.97)}
+}
+
+.tab:not(.active):hover{
+  background:var(--hover-bg);
+  color:var(--text);
+}
+.tab.active{
+  background:var(--active-bg);
+  color:#e8e8e8;
+  font-weight:500;
+}
+.tab.dragging{opacity:.25;cursor:grabbing}
+.tab.drag-over::before{
+  content:'';position:absolute;left:-1px;top:4px;bottom:4px;
+  width:2px;background:rgba(255,255,255,0.25);border-radius:2px;
+}
+
+/* close button inside tab */
+.tab .x{
+  display:flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:3px;
+  cursor:pointer;
+  flex-shrink:0;
+  margin-left:1px;
+  opacity:0;
+  transition:opacity .15s, background .15s;
+}
+.tab:hover .x,.tab.active .x{opacity:.38}
+.tab .x:hover{opacity:1!important;background:rgba(255,255,255,0.1)}
+.tab .x svg{width:9px;height:9px;display:block}
+
+/* save pulse dot */
+.tab .sdot{
+  position:absolute;top:5px;right:5px;
+  width:3.5px;height:3.5px;border-radius:50%;
+  background:rgba(255,255,255,.5);
+  opacity:0;transition:opacity .2s;
+}
+.tab .sdot.on{opacity:1;animation:sdotPulse 1s ease-in-out infinite}
+@keyframes sdotPulse{0%,100%{opacity:.2}50%{opacity:.8}}
+
+/* rename input */
+.tab .rinput{
+  font-family:'Inter',sans-serif;font-size:13px;font-weight:500;letter-spacing:-0.01em;
+  width:90px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.18);
+  border-radius:4px;color:#e8e8e8;padding:1px 6px;outline:none;caret-color:#888;
+}
+.tab .rinput:focus{border-color:rgba(255,255,255,.3)}
+
+/* bar utility buttons */
+.tbar-btn{
+  flex-shrink:0;background:transparent;border:none;cursor:pointer;
+  width:28px;height:28px;border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text-dim);
+  transition:color .15s,background .15s;
+}
+.tbar-btn:hover{color:var(--text-sub);background:var(--hover-bg)}
+.tbar-btn svg{width:14px;height:14px;display:block}
+#tab-add{margin-left:2px}
+#btn-clear{margin-left:auto}
+
+/* ── Editor ── */
+#editor-wrap{flex:1;position:relative;display:flex;min-height:0;overflow:hidden}
+#editor{flex:1;height:100%;position:relative;z-index:1}
+#bg-overlay{position:absolute;inset:0;background-size:cover;background-position:center;pointer-events:none;z-index:0;display:none;transition:opacity .3s}
+
+/* ════════════════════════════
+   RIGHT SIDEBAR
+════════════════════════════ */
+#sidebar{
+  width:210px;min-width:160px;max-width:360px;
+  background:var(--sb-bg);
+  display:flex;flex-direction:column;
+  position:relative;flex-shrink:0;
+}
+
+/* sidebar header */
+.sb-head{
+  display:flex;align-items:center;
+  padding:0 14px;height:44px;
+  border-bottom:1px solid var(--border);
+  border-left:1px solid var(--border);
+  flex-shrink:0;
+}
+
+/* everything below the header needs the left border too — handled inline */
+.sb-head-label{
+  font-size:11px;font-weight:600;
+  letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--text-dim);
+  flex:1;
+}
+/* small icon button */
+.sb-btn{
+  background:transparent;border:none;cursor:pointer;
+  width:22px;height:22px;border-radius:5px;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text-dim);
+  transition:color .13s,background .13s;flex-shrink:0;
+}
+.sb-btn:hover{color:var(--text-sub);background:var(--hover-bg)}
+.sb-btn svg{width:13px;height:13px;display:block}
+
+/* ── File list ── */
+.files-list{flex:1;overflow-y:auto;padding:6px 6px;display:flex;flex-direction:column;gap:1px;border-left:1px solid var(--border)}
+
+/* each file row */
+.file-item{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 8px 7px 9px;
+  border-radius:6px;cursor:pointer;
+  transition:background .14s var(--ease);
+  position:relative;
+}
+.file-item:hover{background:var(--hover-bg)}
+.file-item.active-file{background:var(--active-bg)}
+/* orphaned = tab closed, file still in list */
+.file-item.orphaned .fi-name{color:var(--text-dim);font-style:italic}
+.file-item.orphaned .fi-icon svg{opacity:.3}
+
+/* file icon */
+.fi-icon{flex-shrink:0;width:15px;height:15px;display:flex;align-items:center;justify-content:center}
+.fi-icon svg{width:14px;height:14px;color:var(--text-sub);display:block;transition:color .12s}
+.file-item:hover .fi-icon svg{color:var(--text)}
+.file-item.active-file .fi-icon svg{color:var(--text)}
+
+/* file name */
+.fi-name{
+  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:13px;font-weight:400;color:var(--text-sub);
+  transition:color .12s;
+  line-height:1;
+}
+.file-item:hover .fi-name{color:var(--text)}
+.file-item.active-file .fi-name{color:var(--text);font-weight:500}
+
+/* remove × */
+.fi-rem{
+  flex-shrink:0;width:14px;height:14px;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:3px;cursor:pointer;
+  opacity:0;transition:opacity .12s,color .12s,background .12s;
+  color:var(--text-dim);
+}
+.file-item:hover .fi-rem{opacity:1}
+.fi-rem:hover{color:rgba(255,80,80,.7);background:rgba(255,60,60,.07)}
+.fi-rem svg{width:10px;height:10px;display:block}
+
+/* empty state */
+.files-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:36px 16px;gap:8px;text-align:center;pointer-events:none;
+}
+.files-empty svg{width:22px;height:22px;color:var(--text-dim);opacity:.5}
+.files-empty p{font-size:12px;color:var(--text-dim);line-height:1.7;margin:0}
+
+/* ── Footer ── */
+.sb-footer{
+  display:flex;gap:4px;padding:8px;
+  border-top:1px solid var(--border);border-left:1px solid var(--border);flex-shrink:0;
+}
+.sb-foot-btn{
+  flex:1;background:transparent;border:1px solid var(--border);
+  color:var(--text-sub);height:32px;border-radius:6px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:5px;
+  font-family:'Inter',sans-serif;font-size:12px;font-weight:400;
+  transition:background .13s,border-color .13s,color .13s,transform .1s;
+}
+.sb-foot-btn:hover{background:var(--hover-bg);border-color:rgba(255,255,255,.1);color:var(--text);transform:translateY(-1px)}
+.sb-foot-btn:active{transform:none}
+.sb-foot-btn svg{width:13px;height:13px;flex-shrink:0}
+
+/* sidebar resizer strip */
+#sb-resize{
+  position:absolute;top:0;left:0;width:4px;height:100%;
+  cursor:col-resize;z-index:10;
+  transition:background .15s;
+}
+#sb-resize:hover{background:rgba(255,255,255,.06)}
+
+/* ════════════════════════════
+   CONTEXT MENU
+════════════════════════════ */
+#ctx{
+  position:fixed;z-index:9999;
+  background:rgba(20,20,20,.96);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:9px;padding:4px;min-width:130px;
+  box-shadow:0 12px 32px rgba(0,0,0,.65);
+  opacity:0;transform:scale(.94) translateY(-4px);
+  transition:opacity .15s var(--ease),transform .15s var(--ease);
+  pointer-events:none;
+}
+#ctx.show{opacity:1;transform:scale(1) translateY(0);pointer-events:auto}
+.ctx-row{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 10px;border-radius:6px;
+  font-size:13px;color:var(--text-sub);cursor:pointer;
+  transition:background .1s,color .1s;
+  border:none;background:none;width:100%;text-align:left;font-family:'Inter',sans-serif;
+}
+.ctx-row:hover{background:var(--hover-bg);color:var(--text)}
+.ctx-row svg{width:13px;height:13px;opacity:.55;flex-shrink:0}
+.ctx-sep{height:1px;background:rgba(255,255,255,.06);margin:3px 6px}
+
+/* ════════════════════════════
+   TOASTS
+════════════════════════════ */
+#toasts{
+  position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:10000;
+  display:flex;flex-direction:column;gap:5px;
+  align-items:center;pointer-events:none;
+}
+.tst{
+  display:flex;align-items:center;gap:7px;
+  background:rgba(18,18,18,.92);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:7px 12px;
+  box-shadow:0 4px 18px rgba(0,0,0,.5);
+  font-size:12.5px;font-family:'Inter',sans-serif;color:rgba(255,255,255,.55);
+  white-space:nowrap;pointer-events:auto;
+  opacity:0;transform:translateY(6px) scale(.97);
+  transition:opacity .18s var(--ease),transform .18s var(--ease);
+  position:relative;overflow:hidden;
+}
+.tst.show{opacity:1;transform:none}
+.tst.hide{opacity:0;transform:translateY(4px) scale(.97)}
+.tst svg{width:11px;height:11px;color:rgba(255,255,255,.35);flex-shrink:0}
+.tst-bar{position:absolute;bottom:0;left:0;height:1px;width:100%}
+.tst-fill{height:100%;background:rgba(255,255,255,.12);animation:tstshrink var(--d,1.8s) linear forwards}
+@keyframes tstshrink{from{width:100%}to{width:0}}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══ Editor ═══ -->
+  <div id="right">
+    <div id="tabs-bar" role="tablist">
+      <button class="tbar-btn" id="tab-add" title="New tab">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="tbar-btn" id="btn-clear" title="Clear editor">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    </div>
+    <div id="editor-wrap">
+      <div id="bg-overlay"></div>
+      <div id="editor"></div>
+    </div>
+  </div>
+
+  <!-- ═══ Right sidebar ═══ -->
+  <aside id="sidebar">
+    <div id="sb-resize" aria-hidden="true"></div>
+
+    <div class="sb-head">
+      <span class="sb-head-label">Explorer</span>
+    </div>
+
+    <div class="files-list" id="files-list">
+      <div class="files-empty" id="files-empty">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <p>No scripts loaded.<br>Open or create one.</p>
+      </div>
+    </div>
+
+    <div class="sb-footer">
+      <button class="sb-foot-btn" id="btn-save" title="Save">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save
+      </button>
+      <button class="sb-foot-btn" id="btn-open" title="Open">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Open
+      </button>
+    </div>
+  </aside>
+</div>
+
+<!-- Context menu -->
+<div id="ctx">
+  <button class="ctx-row" id="ctx-rename">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    Rename
+  </button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-row" id="ctx-close">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+    Close tab
+  </button>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+(function(){
+  /* ── state ── */
+  const tabs = [];
+  let activeId = null;
+  let editor   = null;
+  let ready    = false;
+  let ctxId    = null;
+  let saveT    = null;
+  let dragged  = null;
+  const exFiles = [];          // explorer entries, persist past tab close
+
+  /* ── dom ── */
+  const tabsBar   = document.getElementById('tabs-bar');
+  const tabAdd    = document.getElementById('tab-add');
+  const btnClear  = document.getElementById('btn-clear');
+  const edEl      = document.getElementById('editor');
+  const filesList = document.getElementById('files-list');
+  const filesEmpty= document.getElementById('files-empty');
+  const ctx       = document.getElementById('ctx');
+  const toastWrap = document.getElementById('toasts');
+
+  /* ════════════════════════════
+     TOASTS
+  ════════════════════════════ */
+  function toast(msg, dur=1900){
+    const el = document.createElement('div');
+    el.className = 'tst';
+    el.style.setProperty('--d', dur+'ms');
+    el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>${esc(msg)}<div class="tst-bar"><div class="tst-fill"></div></div>`;
+    toastWrap.appendChild(el);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('show')));
+    setTimeout(()=>{ el.classList.remove('show'); el.classList.add('hide'); setTimeout(()=>el.remove(), 220); }, dur);
+  }
+
+  /* ════════════════════════════
+     CONTEXT MENU
+  ════════════════════════════ */
+  function hideCtx(){ ctx.classList.remove('show'); ctxId=null; }
+  document.addEventListener('click', e=>{ if(!ctx.contains(e.target)) hideCtx(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') hideCtx(); });
+
+  document.getElementById('ctx-rename').addEventListener('click', e=>{
+    e.stopPropagation(); const id=ctxId; hideCtx();
+    const t=tabs.find(x=>x.id===id); if(t) doRename(t);
+  });
+  document.getElementById('ctx-close').addEventListener('click', e=>{
+    e.stopPropagation(); const id=ctxId; hideCtx();
+    closeTab(id);
+  });
+
+  /* ════════════════════════════
+     PERSIST (localStorage)
+  ════════════════════════════ */
+  function sched(){ if(saveT) clearTimeout(saveT); saveT=setTimeout(saveAll, 2000); }
+
+  function saveAll(){
+    try{
+      localStorage.setItem('zylite_tabs',    JSON.stringify(tabs.map(t=>({id:t.id,name:t.name,content:t.content,filename:t.filename}))));
+      localStorage.setItem('zylite_active',  String(activeId));
+      localStorage.setItem('zylite_ex',      JSON.stringify(exFiles.map(f=>({key:f.key,filename:f.filename,content:f.content,tabId:f.tabId}))));
+      const at=tabs.find(t=>t.id===activeId);
+      if(at?.element){ const d=at.element.querySelector('.sdot'); if(d){ d.classList.add('on'); setTimeout(()=>d.classList.remove('on'),1000); } }
+    } catch(e){}
+  }
+
+  function loadAll(){
+    try{
+      const raw  = JSON.parse(localStorage.getItem('zylite_tabs')||'null');
+      const aid  = localStorage.getItem('zylite_active');
+      const exRaw= JSON.parse(localStorage.getItem('zylite_ex')||'null');
+      if(raw && Array.isArray(raw) && raw.length>0){
+        raw.forEach(td=> createTab(td.content||'', td.filename, td.id, true, td.name));
+        const tgt = raw.find(t=>t.id==aid);
+        activateTab(tgt ? Number(tgt.id) : tabs[0].id);
+        if(exRaw && Array.isArray(exRaw)){
+          exRaw.forEach(f=>{ exFiles.push({key:f.key,filename:f.filename,content:f.content||'',tabId:f.tabId}); });
+          exFiles.forEach(f=>filesList.appendChild(makeFileItem(f)));
+          refreshEmpty(); syncExActive();
+        }
+        toast('Session restored');
+        return true;
+      }
+    } catch(e){ console.error(e); }
+    return false;
+  }
+
+  /* ════════════════════════════
+     EXPLORER
+  ════════════════════════════ */
+  function refreshEmpty(){ filesEmpty.style.display=exFiles.length===0?'flex':'none'; }
+
+  function syncExActive(){
+    filesList.querySelectorAll('.file-item').forEach(el=>el.classList.remove('active-file'));
+    const f=exFiles.find(x=>x.tabId===activeId);
+    if(f){ const el=filesList.querySelector(`[data-key="${f.key}"]`); if(el) el.classList.add('active-file'); }
+  }
+
+  function makeFileItem(f){
+    const el=document.createElement('div');
+    el.className='file-item'+(f.tabId===null?' orphaned':'');
+    el.dataset.key=f.key;
+    el.innerHTML=`
+      <div class="fi-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+      </div>
+      <div class="fi-name">${esc(f.filename)}</div>
+      <div class="fi-rem" title="Remove">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </div>`;
+
+    /* click row → activate or re-open */
+    el.addEventListener('click', e=>{
+      if(e.target.closest('.fi-rem')) return;
+      if(f.tabId!==null && tabs.find(t=>t.id===f.tabId)){ activateTab(f.tabId); return; }
+      // re-open orphaned
+      const nt=createTab(f.content||'', f.filename, null, true, f.filename.replace(/\.[^/.]+$/,''));
+      f.tabId=nt.id; el.classList.remove('orphaned'); syncExActive();
+      toast('Reopened '+f.filename); sched();
+    });
+
+    /* click × → remove from explorer (and close tab if open) */
+    el.querySelector('.fi-rem').addEventListener('click', e=>{
+      e.stopPropagation();
+      if(f.tabId!==null) closeTab(f.tabId, true, true);
+      exFiles.splice(exFiles.findIndex(x=>x.key===f.key),1);
+      el.remove(); refreshEmpty(); sched();
+    });
+
+    return el;
+  }
+
+  function addToExplorer(tabId, filename, content){
+    const ex=exFiles.find(f=>f.filename===filename);
+    if(ex){ ex.tabId=tabId; ex.content=content; syncExActive(); return; }
+    const key = Date.now()+'_'+Math.random().toString(36).slice(2,6);
+    const entry={key,filename,tabId,content:content||''};
+    exFiles.push(entry);
+    filesList.appendChild(makeFileItem(entry));
+    refreshEmpty(); syncExActive();
+  }
+
+  function orphan(tabId){
+    const f=exFiles.find(x=>x.tabId===tabId);
+    if(!f) return;
+    const t=tabs.find(x=>x.id===tabId); if(t) f.content=t.content;
+    f.tabId=null;
+    const el=filesList.querySelector(`[data-key="${f.key}"]`);
+    if(el) el.classList.add('orphaned');
+    syncExActive();
+  }
+
+  /* ════════════════════════════
+     TABS
+  ════════════════════════════ */
+  function xIcon(){
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>`;
+  }
+
+  /* next available "Script N" */
+  function nextName(){
+    const used=new Set(tabs.map(t=>t.name));
+    let n=1; while(used.has('Script '+n)) n++;
+    return 'Script '+n;
+  }
+
+  /* re-label only unnamed tabs after a close */
+  function relabel(){
+    let n=1;
+    tabs.forEach(t=>{
+      if(!t.filename){ t.name='Script '+n++; }
+      if(t.element){ const l=t.element.querySelector('.label'); if(l&&l.tagName!=='INPUT') l.textContent=t.name; }
+    });
+  }
+
+  function bindTabEvents(el, tObj){
+    const {id} = tObj;
+    el.setAttribute('draggable','true');
+
+    el.addEventListener('click', e=>{
+      if(e.target.closest('.x')){ closeTab(id); return; }
+      activateTab(id);
+    });
+
+    el.addEventListener('contextmenu', e=>{
+      e.preventDefault(); e.stopPropagation();
+      ctx.classList.remove('show'); ctxId=id;
+      const r=el.getBoundingClientRect();
+      ctx.style.left=r.left+'px'; ctx.style.top=r.bottom+5+'px';
+      requestAnimationFrame(()=>ctx.classList.add('show'));
+    });
+
+    el.addEventListener('dragstart', e=>{ dragged=tObj; el.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+    el.addEventListener('dragend',   ()=>{ el.classList.remove('dragging'); document.querySelectorAll('.tab').forEach(t=>t.classList.remove('drag-over')); dragged=null; });
+    el.addEventListener('dragover',  e=>{ if(!dragged||dragged.id===id) return; e.preventDefault(); document.querySelectorAll('.tab').forEach(t=>t.classList.remove('drag-over')); el.classList.add('drag-over'); });
+    el.addEventListener('drop',      e=>{
+      e.preventDefault(); if(!dragged||dragged.id===id) return;
+      const di=tabs.findIndex(t=>t.id===dragged.id); tabs.splice(di,1);
+      const ni=tabs.findIndex(t=>t.id===id); tabs.splice(ni,0,dragged);
+      [...tabsBar.querySelectorAll('.tab')].forEach(t=>t.remove());
+      tabs.forEach(t=>tabsBar.insertBefore(t.element,tabAdd));
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('drag-over')); sched();
+    });
+  }
+
+  /* forceName = restore saved name; skipToast for session restore */
+  function createTab(initContent='', filename=null, forceId=null, skipToast=false, forceName=null){
+    const id   = forceId ? Number(forceId) : (Date.now()+Math.floor(Math.random()*999));
+    const name = forceName || (filename ? filename.replace(/\.[^/.]+$/,'') : nextName());
+    const tObj = {id, name, content:initContent, element:null, filename:filename||null};
+    tabs.push(tObj);
+
+    const el=document.createElement('div');
+    el.className='tab';
+    el.dataset.id=id;
+    el.innerHTML=`<span class="label">${esc(name)}</span><div class="sdot"></div><div class="x" title="Close">${xIcon()}</div>`;
+    tabsBar.insertBefore(el, tabAdd);
+    tObj.element=el;
+
+    bindTabEvents(el, tObj);
+    activateTab(id);
+    if(ready && editor) editor.setValue(initContent||'');
+    if(!skipToast) toast('Created "'+name+'"');
+    return tObj;
+  }
+
+  function doRename(tObj){
+    const lbl=tObj.element.querySelector('.label'); if(!lbl) return;
+    const old=lbl.textContent;
+    const inp=document.createElement('input'); inp.className='rinput'; inp.value=old; inp.spellcheck=false;
+    lbl.replaceWith(inp); inp.focus(); inp.select();
+    function commit(){
+      const v=inp.value.trim();
+      const nl=document.createElement('span'); nl.className='label'; nl.textContent=v||old;
+      inp.replaceWith(nl);
+      if(v&&v!==old){ tObj.name=v; tObj.filename=v; toast('Renamed to "'+v+'"'); sched(); }
+    }
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){e.preventDefault();inp.blur();} if(e.key==='Escape'){inp.value=old;inp.blur();} });
+  }
+
+  function activateTab(id){
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    const tObj=tabs.find(x=>x.id===id); if(!tObj) return;
+    tObj.element?.classList.add('active'); activeId=id;
+    if(ready && editor){ editor.setValue(tObj.content||''); editor.focus(); }
+    syncExActive(); sched();
+  }
+
+  function closeTab(id, removeArr=true, silent=false){
+    const idx=tabs.findIndex(t=>t.id===id); if(idx===-1) return;
+    const tObj=tabs[idx];
+    orphan(id);
+    if(tObj.element){ tObj.element.style.animation='tabLeave .18s var(--ease) forwards'; setTimeout(()=>tObj.element?.parentNode?.removeChild(tObj.element), 185); }
+    if(removeArr) tabs.splice(idx,1);
+    if(!silent) toast('Closed "'+tObj.name+'"');
+    sched();
+    if(activeId===id){
+      if(tabs.length>0) setTimeout(()=>{ activateTab(tabs[Math.max(0,idx-1)].id); relabel(); }, 190);
+      else setTimeout(()=>createTab(''), 190);
+    } else relabel();
+  }
+
+  tabAdd.addEventListener('click', ()=>createTab(''));
+  btnClear.addEventListener('click', ()=>{
+    if(ready&&editor){
+      editor.setValue('');
+      const t=tabs.find(x=>x.id===activeId); if(t){t.content='';sched();}
+      toast('Cleared');
+    }
+  });
+
+  /* ════════════════════════════
+     HOST BRIDGE
+  ════════════════════════════ */
+  window.openFileInEditor=function(content,filename){
+    const t=tabs.find(x=>x.id===activeId);
+    if(!t){ const nt=createTab(content,filename); addToExplorer(nt.id,filename||nt.name,content); return; }
+    t.content=content||''; if(filename) t.filename=filename; relabel();
+    if(ready&&editor) editor.setValue(t.content);
+    if(filename) addToExplorer(t.id,filename,content); sched();
+  };
+  window.setEditorContentFromHost=window.openFileInEditor;
+
+  if(window.chrome?.webview?.addEventListener){
+    window.chrome.webview.addEventListener('message', ev=>{
+      try{
+        let d=ev.data; if(typeof d==='string') try{d=JSON.parse(d);}catch(e){}
+        if(!d) return;
+        if(d.type==='fileContent') window.openFileInEditor(d.content||'',d.fileName||d.filename||null);
+        else if(d.command==='sendFile') window.openFileInEditor(d.payload||'',d.name||null);
+      }catch(e){}
+    });
+  } else {
+    window.addEventListener('message', ev=>{
+      try{ const d=ev.data; if(d?.type==='fileContent') window.openFileInEditor(d.content||'',d.fileName||d.filename||null); }catch(e){}
+    });
+  }
+
+  /* ════════════════════════════
+     MONACO
+  ════════════════════════════ */
+  require.config({paths:{'vs':'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.33.0/min/vs'}});
+  require(['vs/editor/editor.main'], function(){
+
+    monaco.editor.defineTheme('Zylite',{
+      base:'vs-dark', inherit:true,
+      rules:[
+        {token:'',          foreground:'c0c0c0'},
+        {token:'keyword',   foreground:'e2e2e2', fontStyle:'bold'},
+        {token:'operator',  foreground:'6a6a6a'},
+        {token:'delimiter', foreground:'525252'},
+        {token:'function',  foreground:'d8d8d8'},
+        {token:'string',    foreground:'8f8f8f'},
+        {token:'number',    foreground:'ababab'},
+        {token:'comment',   foreground:'515151', fontStyle:'italic'},
+        {token:'type',      foreground:'bbbbbb'},
+      ],
+      colors:{
+        'editor.background':                 '#111111',
+        'editor.foreground':                 '#c0c0c0',
+        'editorLineNumber.foreground':       '#2e2e2e',
+        'editorLineNumber.activeForeground': '#5a5a5a',
+        'editorCursor.foreground':           '#686868',
+        'editor.selectionBackground':        'rgba(255,255,255,0.07)',
+        'editor.inactiveSelectionBackground':'rgba(255,255,255,0.03)',
+        'editorSuggestWidget.background':    '#181818',
+        'editorSuggestWidget.border':        '#252525',
+        'editorSuggestWidget.selectedBackground':'rgba(255,255,255,0.08)',
+        'list.activeSelectionBackground':    'rgba(255,255,255,0.08)',
+        'list.activeSelectionForeground':    '#e0e0e0',
+        'list.hoverBackground':              'rgba(255,255,255,0.04)',
+        'scrollbarSlider.background':        'rgba(255,255,255,0.05)',
+        'scrollbarSlider.hoverBackground':   'rgba(255,255,255,0.09)',
+        'scrollbarSlider.activeBackground':  'rgba(255,255,255,0.13)',
+        'editorWidget.border':               '#252525',
+        'focusBorder':                       'rgba(255,255,255,0.14)',
+        'input.background':                  '#181818',
+        'input.border':                      '#252525',
+        'button.background':                 '#242424',
+        'button.hoverBackground':            '#2e2e2e',
+        'button.foreground':                 '#d0d0d0',
+        'badge.background':                  '#242424',
+        'badge.foreground':                  '#c0c0c0',
+        'progressBar.background':            '#404040',
+      }
+    });
+
+    editor = monaco.editor.create(edEl, {
+      value:'', language:'lua', theme:'Zylite',
+      fontSize: 13,
+      fontFamily: "'JetBrains Mono','Fira Code',monospace",
+      fontLigatures: true,
+      lineHeight: 22,
+      minimap:{ enabled:true },
+      automaticLayout: true,
+      glyphMargin: false,
+      folding: true,
+      scrollBeyondLastLine: false,
+      smoothScrolling: true,
+      cursorSmoothCaretAnimation: true,
+      renderLineHighlight: 'none',
+      padding:{ top:16, bottom:16 },
+      scrollbar:{ verticalScrollbarSize:3, horizontalScrollbarSize:3 },
+    });
+
+    monaco.languages.registerCompletionItemProvider('lua',{
+      provideCompletionItems:()=>({suggestions:[
+        {label:'print',   kind:3, insertText:'print(${1:msg})',        insertTextRules:4},
+        {label:'wait',    kind:3, insertText:'wait(${1:seconds})',     insertTextRules:4},
+        {label:'require', kind:3, insertText:'require("${1:module}")', insertTextRules:4},
+        {label:'pairs',   kind:3, insertText:'pairs(${1:tbl})',        insertTextRules:4},
+        {label:'ipairs',  kind:3, insertText:'ipairs(${1:tbl})',       insertTextRules:4},
+        {label:'tonumber',kind:3, insertText:'tonumber(${1:val})',     insertTextRules:4},
+      ]})
+    });
+
+    editor.onDidChangeModelContent(()=>{
+      const t=tabs.find(x=>x.id===activeId);
+      if(t){
+        t.content=editor.getValue();
+        const ef=exFiles.find(f=>f.tabId===activeId); if(ef) ef.content=t.content;
+        sched();
+      }
+    });
+
+    ready=true;
+
+    const restored=loadAll();
+    if(!restored){
+      // fresh start
+      const id=Date.now();
+      const tObj={id,name:'Script 1',content:'-- Welcome to Zylite\nprint("hello")\n',element:null,filename:null};
+      tabs.push(tObj);
+      const el=document.createElement('div');
+      el.className='tab active'; el.dataset.id=id;
+      el.innerHTML=`<span class="label">Script 1</span><div class="sdot"></div><div class="x" title="Close">${xIcon()}</div>`;
+      tabsBar.insertBefore(el,tabAdd); tObj.element=el; activeId=id;
+      bindTabEvents(el,tObj);
+      editor.setValue(tObj.content);
+    }
+    refreshEmpty();
+  });
+
+  /* ── Open file ── */
+  document.getElementById('btn-open').addEventListener('click', ()=>{
+    const inp=document.createElement('input'); inp.type='file'; inp.accept='.lua,.txt';
+    inp.onchange=e=>{
+      const file=e.target.files[0]; if(!file) return;
+      const r=new FileReader();
+      r.onload=ev=>{ const tObj=createTab(ev.target.result,file.name,null,true); addToExplorer(tObj.id,file.name,ev.target.result); toast('Opened '+file.name); sched(); };
+      r.readAsText(file);
+    };
+    inp.click();
+  });
+
+  /* ── Save file ── */
+  document.getElementById('btn-save').addEventListener('click', ()=>{
+    const t=tabs.find(x=>x.id===activeId); if(!t){ toast('No active script'); return; }
+    const fn=t.filename||t.name+'.lua';
+    const blob=new Blob([t.content||''],{type:'text/plain'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    toast('Saved '+fn);
+  });
+
+  /* Ctrl/Cmd+S */
+  window.addEventListener('keydown', e=>{
+    if((navigator.platform.toUpperCase().includes('MAC')?e.metaKey:e.ctrlKey) && e.key.toLowerCase()==='s'){
+      e.preventDefault(); saveAll(); toast('Saved');
+    }
+  });
+
+  /* sidebar resizer */
+  (function(){
+    const sb=document.getElementById('sidebar'), rs=document.getElementById('sb-resize');
+    let drag=false;
+    rs.addEventListener('mousedown', e=>{ e.preventDefault(); drag=true; document.body.style.cursor='col-resize'; document.body.style.userSelect='none'; });
+    window.addEventListener('mousemove', e=>{ if(!drag) return; const r=document.getElementById('app').getBoundingClientRect(); sb.style.width=Math.min(360,Math.max(160,r.right-e.clientX))+'px'; });
+    window.addEventListener('mouseup', ()=>{ if(!drag) return; drag=false; document.body.style.cursor=''; document.body.style.userSelect=''; });
+  })();
+
+  window.addEventListener('beforeunload', saveAll);
+
+  function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  window.updateFileList=()=>{};
+  window.sendFileContentToEditor=window.openFileInEditor;
+})();
+</script>
+</body>
+</html>
