@@ -32,6 +32,15 @@ html,body{height:100%;margin:0;background:transparent;font-family:'Inter',system
 *{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.08) transparent}
 
 /* ── Monaco monochrome patch ── */
+.monaco-editor,
+.monaco-editor-background,
+.monaco-editor .margin,
+.monaco-editor .margin-view-overlays,
+.monaco-editor .glyph-margin,
+.monaco-editor .inputarea.ime-input,
+.monaco-editor .minimap,
+.monaco-editor .minimap-shadow-visible,
+.monaco-editor .minimap canvas { background: transparent !important; }
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row.selected,
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row.focused,
 .monaco-list .monaco-list-row.focused,
@@ -752,7 +761,7 @@ html,body{height:100%;margin:0;background:transparent;font-family:'Inter',system
       fontFamily: "'JetBrains Mono','Fira Code',monospace",
       fontLigatures: true,
       lineHeight: 22,
-      minimap:{ enabled:true },
+      minimap:{ enabled:false },
       automaticLayout: true,
       glyphMargin: false,
       folding: true,
@@ -785,56 +794,6 @@ html,body{height:100%;margin:0;background:transparent;font-family:'Inter',system
     });
 
     ready=true;
-
-    /* ── Called from C# to sync Monaco bg with WebView2 background color ──
-       Usage: await Editor.ExecuteScriptAsync("window.setEditorBackground('#111111')");
-    ── */
-    window.setEditorBackground = function(hex) {
-      monaco.editor.defineTheme('Zylite', {
-        base: 'vs-dark', inherit: true,
-        rules:[
-          {token:'',          foreground:'c0c0c0'},
-          {token:'keyword',   foreground:'e2e2e2', fontStyle:'bold'},
-          {token:'operator',  foreground:'6a6a6a'},
-          {token:'delimiter', foreground:'525252'},
-          {token:'function',  foreground:'d8d8d8'},
-          {token:'string',    foreground:'8f8f8f'},
-          {token:'number',    foreground:'ababab'},
-          {token:'comment',   foreground:'515151', fontStyle:'italic'},
-          {token:'type',      foreground:'bbbbbb'},
-        ],
-        colors:{
-          'editor.background':                 hex,
-          'editorGutter.background':           hex,
-          'editor.foreground':                 '#c0c0c0',
-          'editorLineNumber.foreground':       '#2e2e2e',
-          'editorLineNumber.activeForeground': '#5a5a5a',
-          'editorCursor.foreground':           '#686868',
-          'editor.selectionBackground':        'rgba(255,255,255,0.07)',
-          'editor.inactiveSelectionBackground':'rgba(255,255,255,0.03)',
-          'editorSuggestWidget.background':    '#181818',
-          'editorSuggestWidget.border':        '#252525',
-          'editorSuggestWidget.selectedBackground':'rgba(255,255,255,0.08)',
-          'list.activeSelectionBackground':    'rgba(255,255,255,0.08)',
-          'list.activeSelectionForeground':    '#e0e0e0',
-          'list.hoverBackground':              'rgba(255,255,255,0.04)',
-          'scrollbarSlider.background':        'rgba(255,255,255,0.05)',
-          'scrollbarSlider.hoverBackground':   'rgba(255,255,255,0.09)',
-          'scrollbarSlider.activeBackground':  'rgba(255,255,255,0.13)',
-          'editorWidget.border':               '#252525',
-          'focusBorder':                       'rgba(255,255,255,0.14)',
-          'input.background':                  '#181818',
-          'input.border':                      '#252525',
-          'button.background':                 '#242424',
-          'button.hoverBackground':            '#2e2e2e',
-          'button.foreground':                 '#d0d0d0',
-          'badge.background':                  '#242424',
-          'badge.foreground':                  '#c0c0c0',
-          'progressBar.background':            '#404040',
-        }
-      });
-      monaco.editor.setTheme('Zylite');
-    };
 
     const restored=loadAll();
     if(!restored){
@@ -896,6 +855,86 @@ html,body{height:100%;margin:0;background:transparent;font-family:'Inter',system
   function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   window.updateFileList=()=>{};
   window.sendFileContentToEditor=window.openFileInEditor;
+
+  /* ════════════════════════════
+     THEME ENGINE
+     Called from C#: window.setTheme(r, g, b)
+  ════════════════════════════ */
+  window.setTheme = function(r, g, b) {
+    // Luminance — decides if text should be black or white
+    const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+    const dark = lum < 0.5; // true = bg is dark → use light text
+
+    const text     = dark ? 'rgba(210,210,210,1)'   : 'rgba(30,30,30,1)';
+    const textSub  = dark ? 'rgba(130,130,130,1)'   : 'rgba(90,90,90,1)';
+    const textDim  = dark ? 'rgba(70,70,70,1)'      : 'rgba(150,150,150,1)';
+    const border   = dark ? 'rgba(255,255,255,0.08)': 'rgba(0,0,0,0.1)';
+    const hoverBg  = dark ? 'rgba(255,255,255,0.05)': 'rgba(0,0,0,0.05)';
+    const activeBg = dark ? 'rgba(255,255,255,0.10)': 'rgba(0,0,0,0.10)';
+
+    const root = document.documentElement;
+    root.style.setProperty('--text',      text);
+    root.style.setProperty('--text-sub',  textSub);
+    root.style.setProperty('--text-dim',  textDim);
+    root.style.setProperty('--border',    border);
+    root.style.setProperty('--hover-bg',  hoverBg);
+    root.style.setProperty('--active-bg', activeBg);
+
+    // Update Monaco
+    const hex = '#' + [r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');
+    const fgHex  = dark ? 'c8c8c8' : '1e1e1e';
+    const numHex = dark ? 'ababab'  : '555555';
+    const strHex = dark ? '8f8f8f'  : '777777';
+    const kwHex  = dark ? 'e2e2e2'  : '111111';
+    const cmHex  = dark ? '515151'  : '999999';
+
+    if(typeof monaco !== 'undefined') {
+      monaco.editor.defineTheme('Zylite', {
+        base: dark ? 'vs-dark' : 'vs', inherit: true,
+        rules:[
+          {token:'',         foreground: fgHex},
+          {token:'keyword',  foreground: kwHex, fontStyle:'bold'},
+          {token:'operator', foreground: dark ? '6a6a6a' : '888888'},
+          {token:'delimiter',foreground: dark ? '525252' : 'aaaaaa'},
+          {token:'function', foreground: dark ? 'd8d8d8' : '222222'},
+          {token:'string',   foreground: strHex},
+          {token:'number',   foreground: numHex},
+          {token:'comment',  foreground: cmHex, fontStyle:'italic'},
+          {token:'type',     foreground: dark ? 'bbbbbb' : '333333'},
+        ],
+        colors:{
+          'editor.background':                  hex,
+          'editorGutter.background':            hex,
+          'editor.foreground':                  '#'+fgHex,
+          'editorLineNumber.foreground':        dark ? '#2e2e2e' : '#bbbbbb',
+          'editorLineNumber.activeForeground':  dark ? '#5a5a5a' : '#888888',
+          'editorCursor.foreground':            dark ? '#686868' : '#333333',
+          'editor.selectionBackground':         dark ? '#ffffff12' : '#00000012',
+          'editor.inactiveSelectionBackground': dark ? '#ffffff08' : '#00000008',
+          'editorSuggestWidget.background':     dark ? '#1a1a1a'   : '#f5f5f5',
+          'editorSuggestWidget.border':         dark ? '#252525'   : '#dddddd',
+          'editorSuggestWidget.selectedBackground': dark ? '#ffffff14' : '#00000012',
+          'list.activeSelectionBackground':     dark ? '#ffffff14' : '#00000012',
+          'list.activeSelectionForeground':     '#'+fgHex,
+          'list.hoverBackground':               dark ? '#ffffff0a' : '#0000000a',
+          'scrollbarSlider.background':         dark ? '#ffffff0d' : '#0000000d',
+          'scrollbarSlider.hoverBackground':    dark ? '#ffffff17' : '#00000017',
+          'scrollbarSlider.activeBackground':   dark ? '#ffffff21' : '#00000021',
+          'editorWidget.border':                dark ? '#252525'   : '#dddddd',
+          'focusBorder':                        dark ? '#ffffff24' : '#00000024',
+          'input.background':                   dark ? '#181818'   : '#eeeeee',
+          'input.border':                       dark ? '#252525'   : '#dddddd',
+          'button.background':                  dark ? '#242424'   : '#e0e0e0',
+          'button.hoverBackground':             dark ? '#2e2e2e'   : '#cccccc',
+          'button.foreground':                  '#'+fgHex,
+          'badge.background':                   dark ? '#242424'   : '#e0e0e0',
+          'badge.foreground':                   '#'+fgHex,
+          'progressBar.background':             dark ? '#404040'   : '#aaaaaa',
+        }
+      });
+      monaco.editor.setTheme('Zylite');
+    }
+  };
 })();
 </script>
 </body>
