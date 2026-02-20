@@ -21,7 +21,7 @@
   --ease:      cubic-bezier(.25,.1,.25,1);
 }
 *,*::before,*::after{box-sizing:border-box}
-html,body{height:100%;margin:0;background:var(--bg);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+html,body{height:100%;margin:0;background:transparent;font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 #app{display:flex;height:100vh;width:100vw;color:var(--text);overflow:hidden}
 
 /* ── scrollbars ── */
@@ -53,7 +53,7 @@ html,body{height:100%;margin:0;background:var(--bg);font-family:'Inter',system-u
   align-items:center;
   gap:1px;
   padding:0 8px;
-  background:var(--bg);
+  background:transparent;
   border-bottom:1px solid var(--border);
   overflow-x:auto;
   flex-shrink:0;
@@ -165,7 +165,7 @@ html,body{height:100%;margin:0;background:var(--bg);font-family:'Inter',system-u
 ════════════════════════════ */
 #sidebar{
   width:210px;min-width:160px;max-width:360px;
-  background:var(--sb-bg);
+  background:transparent;
   display:flex;flex-direction:column;
   position:relative;flex-shrink:0;
 }
@@ -785,6 +785,56 @@ html,body{height:100%;margin:0;background:var(--bg);font-family:'Inter',system-u
     });
 
     ready=true;
+
+    /* ── Called from C# to sync Monaco bg with WebView2 background color ──
+       Usage: await Editor.ExecuteScriptAsync("window.setEditorBackground('#111111')");
+    ── */
+    window.setEditorBackground = function(hex) {
+      monaco.editor.defineTheme('Zylite', {
+        base: 'vs-dark', inherit: true,
+        rules:[
+          {token:'',          foreground:'c0c0c0'},
+          {token:'keyword',   foreground:'e2e2e2', fontStyle:'bold'},
+          {token:'operator',  foreground:'6a6a6a'},
+          {token:'delimiter', foreground:'525252'},
+          {token:'function',  foreground:'d8d8d8'},
+          {token:'string',    foreground:'8f8f8f'},
+          {token:'number',    foreground:'ababab'},
+          {token:'comment',   foreground:'515151', fontStyle:'italic'},
+          {token:'type',      foreground:'bbbbbb'},
+        ],
+        colors:{
+          'editor.background':                 hex,
+          'editorGutter.background':           hex,
+          'editor.foreground':                 '#c0c0c0',
+          'editorLineNumber.foreground':       '#2e2e2e',
+          'editorLineNumber.activeForeground': '#5a5a5a',
+          'editorCursor.foreground':           '#686868',
+          'editor.selectionBackground':        'rgba(255,255,255,0.07)',
+          'editor.inactiveSelectionBackground':'rgba(255,255,255,0.03)',
+          'editorSuggestWidget.background':    '#181818',
+          'editorSuggestWidget.border':        '#252525',
+          'editorSuggestWidget.selectedBackground':'rgba(255,255,255,0.08)',
+          'list.activeSelectionBackground':    'rgba(255,255,255,0.08)',
+          'list.activeSelectionForeground':    '#e0e0e0',
+          'list.hoverBackground':              'rgba(255,255,255,0.04)',
+          'scrollbarSlider.background':        'rgba(255,255,255,0.05)',
+          'scrollbarSlider.hoverBackground':   'rgba(255,255,255,0.09)',
+          'scrollbarSlider.activeBackground':  'rgba(255,255,255,0.13)',
+          'editorWidget.border':               '#252525',
+          'focusBorder':                       'rgba(255,255,255,0.14)',
+          'input.background':                  '#181818',
+          'input.border':                      '#252525',
+          'button.background':                 '#242424',
+          'button.hoverBackground':            '#2e2e2e',
+          'button.foreground':                 '#d0d0d0',
+          'badge.background':                  '#242424',
+          'badge.foreground':                  '#c0c0c0',
+          'progressBar.background':            '#404040',
+        }
+      });
+      monaco.editor.setTheme('Zylite');
+    };
 
     const restored=loadAll();
     if(!restored){
